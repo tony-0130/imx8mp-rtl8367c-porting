@@ -25,6 +25,7 @@ Porting RTL8367C Ethernet Switch to IMX8MP platform with custom Linux network dr
 imx8mp-rtl8367c-porting/
 ├── README.md
 ├── docs/
+│   └── device-tree-config.md
 └── driver/
 └── (development in progress)
 ```
@@ -32,4 +33,11 @@ imx8mp-rtl8367c-porting/
 ## Development Progress
 
 - [x] Project planning and requirements analysis
-- [ ] Device tree configuration design
+- [x] Device tree configuration design
+- [ ] Platform driver development
+	- [ ] Basic driver structure
+	- [ ] Driver initialization (MDIO interface & reset process)
+	- [ ] Check communication between IMX8MP and RTL8367C
+	- [ ] RTL8367C switch initialization
+	- [ ] LED behavior control of each speed / activity
+	- [ ] Debug file system control of test pattern transmission
