@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# RTL8367 device configuration
+#
+
+config NET_RTL8367
+	bool "Realtek RTL8367c/d series switch and router"
+	default n

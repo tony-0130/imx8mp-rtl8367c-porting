@@ -26,8 +26,21 @@ imx8mp-rtl8367c-porting/
 ├── README.md
 ├── docs/
 │   └── device-tree-config.md
-└── driver/
-└── (development in progress)
+└── kernel/
+    └── drivers/
+        └── net/
+            └── ethernet/
+                ├── Kconfig
+                ├── Makefile
+                └── rtl8367/
+                    ├── Kconfig
+                    ├── Makefile
+                    ├── Put_the_driver_source_code_here
+                    ├── rtl8367c.c
+                    └── dal/
+                        ├── Makefile
+                        └── rtl8367c/
+                            └── Makefile
 ```
 
 ## Development Progress
@@ -35,9 +48,10 @@ imx8mp-rtl8367c-porting/
 - [x] Project planning and requirements analysis
 - [x] Device tree configuration design
 - [ ] Platform driver development
-	- [ ] Basic driver structure
+	- [x] Basic driver structure
 	- [ ] Driver initialization (MDIO interface & reset process)
 	- [ ] Check communication between IMX8MP and RTL8367C
 	- [ ] RTL8367C switch initialization
 	- [ ] LED behavior control of each speed / activity
 	- [ ] Debug file system control of test pattern transmission
+- [x] Set up Kconfig and Makefile
