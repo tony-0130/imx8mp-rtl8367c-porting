@@ -10,12 +10,117 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_gpio.h>
+#include <linux/gpio.h>
+#include <linux/delay.h>
+#include <linux/of_mdio.h>
+#include <linux/mdio.h>
 #include <linux/platform_device.h>
 #include <linux/of_platform.h>
 
+#include "rtk_switch.h"
+#include "rtk_error.h"
+
+/* The MDIO bus */
+struct mii_bus *rtl8367c_mdio_bus = NULL;
+
+/* External read/write function from rtl8367c_smi.c */
+extern int rtl8367c_smi_read(unsigned int mAddrs, unsigned int *rData);
+extern int rtl8367c_smi_write(unsigned int mAddrs, unsigned int rData);
+
+static int rtl8367c_mdio_init(struct platform_device *pdev)
+{
+	struct device_node *mdio_node;
+	struct platform_device *mdio_pdev;
+
+	// Check 'mdio-gpio' property exist
+	mdio_node = of_parse_phandle(pdev->dev.of_node, "mdio-bus", 0);
+	if (!mdio_node) {
+		dev_err(&pdev->dev, "Failed to get mdio-bus phandle\n");
+		return -ENODEV;
+	}
+
+	dev_info(&pdev->dev, "Found mdio node: %s\n", mdio_node->full_name);
+
+	// Check MDIO platform device
+	mdio_pdev = of_find_device_by_node(mdio_node);
+	if (!mdio_pdev) {
+		dev_err(&pdev->dev, "No platform device found for mdio mode\n");
+	} else {
+		dev_info(&pdev->dev, "Found MDIO platform device: %s\n", dev_name(&mdio_pdev->dev));
+		put_device(&mdio_pdev->dev);
+	}
+
+	// Fetch MDIO platform device
+	rtl8367c_mdio_bus = of_mdio_find_bus(mdio_node);
+	of_node_put(mdio_node);
+
+	if (!rtl8367c_mdio_bus) {
+		dev_err(&pdev->dev, "Failed to find MDIO bus\n");
+		return -EPROBE_DEFER;
+	}
+
+	dev_info(&pdev->dev, "Find MDIO bus: %s (id: %s)\n",
+			rtl8367c_mdio_bus->name, rtl8367c_mdio_bus->id);
+	
+	return 0;
+}
+
+static int rtl8367c_gpio_init(struct platform_device *pdev)
+{
+	int ret;
+
+	// Get 'reset-gpio' property from device tree
+	int reset = of_get_named_gpio(pdev->dev.of_node, "reset-gpio", 0);
+
+	ret = gpio_request_one(reset, GPIOF_OUT_INIT_HIGH, "rtl8367c reset");
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to request reset GPIO: %d\n", ret);
+		return ret;
+	}
+
+	msleep(20);
+	gpio_direction_output(reset, 1);
+	msleep(100);
+
+	return 0;
+}
 
 static int rtl8367c_probe(struct platform_device *pdev)
 {
+
+	rtk_api_ret_t retVal;
+	unsigned int ret;
+	int retry_count = 3;
+
+	// Set up MDIO infterface
+	retVal = rtl8367c_mdio_init(pdev);
+	if (retVal != RT_ERR_OK) {
+		dev_err(&pdev->dev, "rtl8367c_mdio_init failed!\n");
+		return -ENODEV;
+	}
+
+	// Set up reset gpio
+	retVal = rtl8367c_gpio_init(pdev);
+	if (retVal != RT_ERR_OK) {
+		dev_err(&pdev->dev, "rtl8367c_gpio_init failed!\n");
+	}
+
+	// Check MDIO interface is working by read the register 0x1202 value
+	for (int i = 0 ; i < retry_count ; i++ ) {
+		
+		msleep(100);
+		retVal = rtl8367c_smi_read(0x1202, &ret);
+
+		if (retVal == RT_ERR_OK) {
+			dev_info(&pdev->dev, "Read 0x1202 value = 0x%04x, retry %d\n", ret, i);
+
+			if (ret == 0x88a8) break;
+		} else {
+			dev_err(&pdev->dev, "Read 0x1202 value failed!, fail count = %d\n", i);
+		}
+	}
+	
 	dev_info(&pdev->dev, "RTL8367C driver probe\n");
 
 	return 0;
@@ -53,7 +158,7 @@ static int __init rtl8367c_module_init(void)
 }
 late_initcall(rtl8367c_module_init);
 
-static int __init rtl8367c_module_exit(void)
+static int __exit rtl8367c_module_exit(void)
 {
 	return platform_driver_unregister(&rtl8367c_driver)
 }
