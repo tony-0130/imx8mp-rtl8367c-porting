@@ -20,6 +20,7 @@
 
 #include "rtk_switch.h"
 #include "rtk_error.h"
+#include "port.h"
 
 /* The MDIO bus */
 struct mii_bus *rtl8367c_mdio_bus = NULL;
@@ -119,6 +120,33 @@ static int rtl8367c_probe(struct platform_device *pdev)
 		} else {
 			dev_err(&pdev->dev, "Read 0x1202 value failed!, fail count = %d\n", i);
 		}
+	}
+
+	// Run realtek switch init process
+	retVal = rtk_switch_init();
+	if (retVal == RT_ERR_OK) {
+		dev_info(&pdev->dev, "rtk_switch_init success!\n");
+	} else {
+		dev_err(&pdev->dev, "rtk_switch_init failed!\n");
+	}
+
+	// Try to read the ethernet switch chip id
+	retVal = rtl8367c_smi_write(0x13C2, 0x0249);
+	if (retVal != RT_ERR_OK) {
+		dev_err(&pdev->dev, "Write 0x13C2 value 0x0249 failed!\n");
+	}
+
+	retVal = rtl8367c_smi_read(0x1300, &ret);
+	if (retVal == RT_ERR_OK) {
+		dev_info(&pdev->dev, "Read 0x1300 value = 0x%04x\n", ret);
+	} else {
+		dev_err(&pdev->dev, "Read 0x1300 value failed!\n");
+	}
+
+	// Enable all UTP ports ethernet switch
+	retVal = rtk_port_phyEnableAll_set(ENABLED);
+	if (retVal != RT_ERR_OK) {
+		dev_err(&pdev->dev, "Enable all UTP ports failed!\n");
 	}
 	
 	dev_info(&pdev->dev, "RTL8367C driver probe\n");
