@@ -21,6 +21,8 @@
 #include "rtk_switch.h"
 #include "rtk_error.h"
 #include "port.h"
+#include "dal/dal_mgmt.h"
+#include "dal/rtl8367c_asicdrv.h"
 
 /* The MDIO bus */
 struct mii_bus *rtl8367c_mdio_bus = NULL;
@@ -147,6 +149,55 @@ static int rtl8367c_probe(struct platform_device *pdev)
 	retVal = rtk_port_phyEnableAll_set(ENABLED);
 	if (retVal != RT_ERR_OK) {
 		dev_err(&pdev->dev, "Enable all UTP ports failed!\n");
+	}
+
+	// Status LED configuration 
+	// Set LED_GROUP_0 blinking when have some activities
+	retVal = rtk_led_groupConfig_set(LED_GROUP_0, LED_CONFIG_ACT);
+	if (retVal != RT_ERR_OK) {
+		dev_err(&pdev->dev, "Config LED_GROUP_0 to LED_CONFIG_ACT failed!\n");
+	}
+	
+	// Set LED_GROUP_0 blinking rate to 64ms
+	retVal = rtk_led_blinkRate_set(LED_BLINKRATE_64MS);
+	if (retVal != RT_ERR_OK) {
+		dev_err(&pdev-dev, "Config LED_GROUP_0 blinking rate failed!\n");
+	}
+
+	// Set up ability of each speed and activity
+	rtk_led_ability_t ability = {
+		.link_10m = DISABLED,
+		.link_100m = ENABLED,
+		.link_500m = DISABLED,
+		.link_1000m = ENABLED,
+		.link_2500m = DISABLED,
+		.act_rx = ENABLED,
+		.act_tx = ENABLED
+	};
+
+	// Set customize ability to LED_GROUP_0
+	retVal = rtk_led_groupAbility_set(LED_GROUP_0, &ability);
+	if (retVal !=RT_ERR_OK) {
+		dev_err(&pdev->dev, "Set up LED_GROUP_0 ability failed!\n");
+	}
+
+	// Apply LED_GROUP_0 setting to all ports
+	rtk_portmask_t portmask;
+	portmask.bits[0] = 0xE;
+	retVal = rtk_led_enable_set(LED_GROUP_0, &portmask);
+	if (retVal != RT_ERR_OK) {
+		dev_err(&pdev->dev, "Apply LED_GROUP_0 setting to ports failed!\n");
+	}
+
+	// Set LED_GROUP_1 and LED_GROUP_2 to LED_CONFIG_LEDOFF due to unuse
+	retVal = rtk_led_groupConfig_set(LED_GROUP_1, LED_CONFIG_LEDOFF);
+	if (retVal != RT_ERR_OK) {
+		dev_err(&pdev->dev, "Set LED_GROUP_1 to LED_CONFIG_LEDOFF failed!\n");
+	}
+
+	retVal = rtk_led_groupConfig_set(LED_GROUP_2, LED_CONFIG_LEDOFF);
+	if (retVal != RT_ERR_OK) {
+		dev_err(&pdev->dev, "Set LED_GROUP_2 to LED_CONFIG_LEDOFF failed!\n");
 	}
 	
 	dev_info(&pdev->dev, "RTL8367C driver probe\n");
