@@ -24,12 +24,210 @@
 #include "dal/dal_mgmt.h"
 #include "dal/rtl8367c_asicdrv.h"
 
+/* For debugfs use*/
+#include <linux/debugfs.h>
+#include <linux/seq_file.h>
+#include <linux/uaccess.h>
+
 /* The MDIO bus */
 struct mii_bus *rtl8367c_mdio_bus = NULL;
 
 /* External read/write function from rtl8367c_smi.c */
 extern int rtl8367c_smi_read(unsigned int mAddrs, unsigned int *rData);
 extern int rtl8367c_smi_write(unsigned int mAddrs, unsigned int rData);
+
+/* Debugfs related variables & functions */
+static struct dentry *rtl8367c_debugfs_root;
+
+static const char *rtk_testmode_names[] = {
+	"normal",
+	"test1",
+	"test2",
+	"test3",
+	"test4",
+};
+
+static int rtl8367c_set_port_testmode_rtk(int port, rtk_port_phy_test_mode_t test_mode)
+{
+	rtk_api_ret_t retVal;
+
+	if (port < 0 || port > RTK_PHY_ID_MAX) {
+		printk(KERN_ERR "RTL8367C: Invalid port %d, port range is (0-%d)\n", port, RTK_PHY_ID_MAX);
+		return -EINVAL;
+	}
+
+	if (test_mode < PHY_TEST_MODE_NORMAL || test_mode >= PHY_TEST_MODE_END) {
+		printk(KERN_ERR "RTL8367C: Invalid test mode %d\n", test_mode);
+		return -EINVAL;
+	}
+
+	retVal = rtk_port_phyTestMode_set((rtk_port_t)port, test_mode);
+	if (retVal != RT_ERR_OK) {
+		printk(KERN_ERR "RTL8367C: Fail to set test mode %d for port %d (retVal=%d)\n",
+				test_mode, port, retVal);
+		return -EIO;
+	}
+
+	printk(KERN_INFO "RTL8367C: Port %d test mode set to %s (%d)\n",
+			port,
+			test_mode < ARRAY_SIZE(rtk_testmode_names) ? rtk_testmode_names[test_mode] : "unknown",
+			test_mode);
+
+	return 0;
+}
+
+static int rtl8367c_get_port_testmode_rtk(int port, rtk_port_phy_test_mode_t *test_mode)
+{
+	rtk_api_ret_t retVal;
+
+	if (port < 0 || port > RTK_PHY_ID_MAX)
+		return -EINVAL;
+
+	retVal = rtk_port_phyTestMode_get((rtk_port_t)port, test_mode);
+	if (retVal != RT_ERR_OK) {
+		printk(KERN_ERR "RTL8367C: Fail to get test mode for port %d (retVal=%d)\n", port, retVal);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static ssize_t rtl8367c_port_testmode_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
+{
+	char command[128];
+	rtk_uint32 port, mode_num;
+	rkt_port_phy_test_mode_t test_mode = PHY_TEST_MODE_NORMAL;
+	int ret;
+
+	if (count >= sizeof(command))
+		return -EINVAL;
+	
+	if (copy_from_user(command, buf, count))
+		return -EFAULT;
+
+	command[count] = '\0';
+
+	if (command[count-1]=='\n')
+		command[count-1] = '\0';
+
+	// set command
+	if (sscanf(command, "set %d %d", &port, &mode_num) == 2) {
+
+		ret = rtl8367c_set_port_testmode_rtk(port, test_mode);
+		if (ret != 0)
+			return ret;
+
+	} else if (sscanf(command, "get %d", &port) == 1) {
+
+		ret = rtl8367c_get_port_testmode_rtk(port, &test_mode);
+
+		if (ret == 0) {
+			printk(KERN_INFO "RTL8367C: Port %d : mode %d\n", port, test_mode);
+		} else {
+			return ret;
+		}
+
+	} else if (strcmp(command, "status") == 0) {
+
+		printk(KERN_INFO "RTL8367C: Test mode status for all ports:\n");
+
+		for (int i = 0 ; i <= RTK_PHY_ID_MAX ; i++) {
+			ret = rtl8367c_get_port_testmode_rtk(i, &test_mode);
+			if (ret == 0) {
+				printk(KERN_INFO "Port %d : mode %d\n", i, test_mode);
+			}
+		}
+
+	} else if (strcmp(command, "reset") == 0) {
+
+		printk(KERN_INFO "RTL8367C: Resetting all ports to normal mode ...\n");
+
+		for (int i = 0 ; i <= RTK_PHY_ID_MAX ; i++) {
+			ret = rtl8367c_set_port_testmode_rtk(i, PHY_TEST_MODE_NORMAL);
+			if (ret != 0)
+				printk(KERN_ERR "Fail to reset port %d\n", i);
+		}
+
+		printk(KERN_INFO "RTL8367C: Resetting ports done.\n");
+
+	} else {
+
+		printk(KERN_INFO "RTL8367C test mode commands:\n");
+		printk(KERN_INFO "  set PORT MODE     - Set MODE of PORT\n");
+		printk(KERN_INFO "  get PORT          - Get MODE of PORT\n");
+		printk(KERN_INFO "  status            - Show status of all ports\n");
+		printk(KERN_INFO "\nExamples:\n");
+		printk(KERN_INFO "  echo 'set 0 1' > testmode\n");
+		printk(KERN_INFO "  echo 'get 2' > testmode\n");
+		printk(KERN_INFO "  echo 'status' > testmode\n");
+		printk(KERN_INFO "  echo 'reset' > testmode\n");
+
+	}
+
+	return count;
+};
+
+static int rtl8367c_testmode_show(struct seq_file *s, void *unused)
+{
+	int port;
+	rtk_port_phy_test_mode_t test_mode;
+	int ret;
+
+	seq_printf(s, "RTL8367C Port Test Mode Status (Using RTK API)\n");
+	seq_printf(s, "===============================================\n\n");
+
+	for (port = 0 ; port <= RTK_PHY_ID_MAX ; port++) {
+
+		ret = rtl8367c_get_port_testmode_rtk(port, &test_mode);
+		if (ret == 0) {
+			seq_printf(s, "Port %d : test mode %d\n", port, test_mode);
+		} else {
+			seq_printf(s, "Port %d : READ ERROR\n", port);
+		}
+	}
+
+	printk(KERN_INFO "\n");
+
+	return 0;
+}
+
+static int rtl8367c_testmode_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, rtl8367c_testmode_show, NULL);
+}
+
+static const struct file_operations rtl8367c_testmode_fops = {
+	.open = rtl8367c_testmode_open,
+	.read = seq_read,
+	.write = rtl8367c_port_testmode_write,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static void rtl8367c_debugfs_init(struct platform_device *pdev)
+{
+	// Create the main directory
+	rtl8367c_debugfs_root = debugfs_create_dir("rtl8367c", NULL);
+	if (!rtl8367c_debugfs_root) {
+		dev_err(&pdev->dev, "Fail to create debugfs directory\n");
+		return;
+	}
+
+	// Create files
+	debugfs_create_file("testmode", 0644, rtl8367c_debugfs_root, NULL,
+			&rtl8367c_testmode_fops);
+
+	dev_info(&pdev->dev, "Debugfs created at /sys/kernel/debug/rtl8367c/\n");
+	dev_info(&pdev->dev, "Available files: testmode\n");
+}
+
+static void rtl8367c_debugfs_cleanup(void)
+{
+	debugfs_remove_recursive(rtl8367c_debugfs_root);
+	rtl8367c_debugfs_root = NULL;
+}
+
+/* Switch init related functions */
 
 static int rtl8367c_mdio_init(struct platform_device *pdev)
 {
@@ -202,11 +400,15 @@ static int rtl8367c_probe(struct platform_device *pdev)
 	
 	dev_info(&pdev->dev, "RTL8367C driver probe\n");
 
+	rtl8367c_debugfs_init(pdev);
+
 	return 0;
 }
 
 static int rtl8367c_remove(struct platform_device* pdev)
 {
+	rtl8367c_debugfs_cleanup();
+
 	dev_info(&pdev->dev, "RTL8367C driver unloaded!\n");
 
 	return 0;

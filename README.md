@@ -54,5 +54,5 @@ imx8mp-rtl8367c-porting/
 	- [x] RTL8367C switch initialization
 	- [x] Enable UTP ports of RTL8367C 
 	- [x] LED behavior control of each speed / activity
-	- [ ] Debug file system control of test pattern transmission
+	- [x] Debug file system control of test pattern transmission
 - [x] Set up Kconfig and Makefile
