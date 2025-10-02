@@ -30,7 +30,23 @@
 struct mdio_gpio_info {
 	struct mdiobb_ctrl ctrl;
 	struct gpio_desc *mdc, *mdio, *mdo;
+	u32 clock_frequency;
+	u32 setup_delay_ns;
+	u32 hold_delay_ns;
+	u32 mdc_delay_ns;
 };
+
+/*
+ * MDC clock period > 125 ns
+ * MDIO to MDC rising setup time > 25 ns
+ * MDIO to MDC rising hold time < 25 ns
+ * MDC to MDIO delay time < 40 ns
+ */
+
+#define RTL8367C_MIN_MDC_PERIOD_NS 125
+#define RTL8367C_MIN_SETUP_TIME_NS 25
+#define RTL8367C_MIN_HOLD_TIME_NS 25
+#define RTL8367C_MAX_DELAY_TIME_NS 40
 
 static int mdio_gpio_get_data(struct device *dev,
 			      struct mdio_gpio_info *bitbang)
@@ -47,6 +63,30 @@ static int mdio_gpio_get_data(struct device *dev,
 
 	bitbang->mdo = devm_gpiod_get_index_optional(dev, NULL, MDIO_GPIO_MDO,
 						     GPIOD_OUT_LOW);
+
+	/* Read timing setting from device tree */
+	if (of_property_read_u32(dev->of_node, "clock-frequency", &bitbang->clock_frequency)) {
+		bitbang->clock_frequency = 2000000; // 2MHz, 500ns period
+	}
+
+	/* Calculate the delay time, make sure fit the RTL8367C spec */
+	bitbang->mdc_delay_ns = 1000000000 / (bitbang->clock_frequency * 2);
+	if (bitbang->mdc_delay_ns < RTL8367C_MIN_MDC_PERIOD_NS / 2) {
+		bitbang->mdc_delay_ns = RTL8367C_MIN_MDC_PERIOD_NS / 2;
+	}
+
+	if (of_property_read_u32(dev->of_node, "setup-delay-ns", &bitbang->setup_delay_ns)) {
+		bitbang->setup_delay_ns = RTL8367C_MIN_SETUP_TIME_NS;
+	}
+
+	if (of_property_read_u32(dev->of_node, "hold-delay-ns", &bitbang->hold_delay_ns)) {
+		bitbang->hold_delay_ns = RTL8367C_MIN_HOLD_TIME_NS;
+	}
+
+	dev_info(dev, "MDIO-GPIO timing: freq=%dHz, mdc_delay=%dns, setup=%dns, hold=%dns\n",
+			bitbang->clock_frequency, bitbang->mdc_delay_ns,
+			bitbang->setup_delay_ns, bitbang->hold_delay_ns);
+
 	return PTR_ERR_OR_ZERO(bitbang->mdo);
 }
 
@@ -61,7 +101,8 @@ static void mdio_dir(struct mdiobb_ctrl *ctrl, int dir)
 		 * assume the pin serves as pull-up. If direction is
 		 * output, the default value is high.
 		 */
-		gpiod_set_value_cansleep(bitbang->mdo, 1);
+		// gpiod_set_value_cansleep(bitbang->mdo, 1);
+		gpiod_set_value(bitbang->mdo, 1);
 		return;
 	}
 
@@ -76,7 +117,10 @@ static int mdio_get(struct mdiobb_ctrl *ctrl)
 	struct mdio_gpio_info *bitbang =
 		container_of(ctrl, struct mdio_gpio_info, ctrl);
 
-	return gpiod_get_value_cansleep(bitbang->mdio);
+	ndelay(bitbang->setup_delay_ns);
+
+	// return gpiod_get_value_cansleep(bitbang->mdio);
+	return gpiod_get_value(bitbang->mdio);
 }
 
 static void mdio_set(struct mdiobb_ctrl *ctrl, int what)
@@ -84,10 +128,16 @@ static void mdio_set(struct mdiobb_ctrl *ctrl, int what)
 	struct mdio_gpio_info *bitbang =
 		container_of(ctrl, struct mdio_gpio_info, ctrl);
 
-	if (bitbang->mdo)
-		gpiod_set_value_cansleep(bitbang->mdo, what);
-	else
-		gpiod_set_value_cansleep(bitbang->mdio, what);
+	if (bitbang->mdo) {
+		// gpiod_set_value_cansleep(bitbang->mdo, what);
+		gpiod_set_value(bitbang->mdo, what);
+	} else {
+		// gpiod_set_value_cansleep(bitbang->mdio, what);
+		gpiod_set_value(bitbang->mdio, what);
+	}
+
+	/* add setup time delay */
+	ndelay(bitbang->setup_delay_ns);
 }
 
 static void mdc_set(struct mdiobb_ctrl *ctrl, int what)
@@ -95,7 +145,16 @@ static void mdc_set(struct mdiobb_ctrl *ctrl, int what)
 	struct mdio_gpio_info *bitbang =
 		container_of(ctrl, struct mdio_gpio_info, ctrl);
 
-	gpiod_set_value_cansleep(bitbang->mdc, what);
+	// gpiod_set_value_cansleep(bitbang->mdc, what);
+	gpiod_set_value(bitbang->mdc, what);
+
+	/* add mdc delay */
+	ndelay(bitbang->mdc_delay_ns);
+
+	/* if is up edge, add extra hold time */
+	if (what) {
+		ndelay(bitbang->hold_delay_ns);
+	}
 }
 
 static const struct mdiobb_ops mdio_gpio_ops = {
