@@ -47,7 +47,7 @@ imx8mp-rtl8367c-porting/
 
 - [x] Project planning and requirements analysis
 - [x] Device tree configuration design
-- [ ] Platform driver development
+- [x] Platform driver development
 	- [x] Basic driver structure
 	- [x] Driver initialization (MDIO interface & reset process)
 	- [x] Check communication between IMX8MP and RTL8367C
@@ -55,4 +55,7 @@ imx8mp-rtl8367c-porting/
 	- [x] Enable UTP ports of RTL8367C 
 	- [x] LED behavior control of each speed / activity
 	- [x] Debug file system control of test pattern transmission
+- [ ] mdio-gpio support
+    - [x] Upload the original code
+    - [ ] Add codes for better support rtl8367c
 - [x] Set up Kconfig and Makefile
